@@ -112,31 +112,40 @@ backup_tenant_namespaces() {
 backup_tenant_storageclasses() {
   info "Backing up StorageClasses allowed for tenant $backup_tenant_name..."
 
-  ALLOWED_SC=$(kubectl get tenant $backup_tenant_name -o jsonpath='{.spec.allowedStorageClasses[*]}')
-  ALLOWED_REGEX=$(kubectl get tenant $backup_tenant_name -o jsonpath='{.spec.allowedStorageClassesRegex}')
+  # Get allowed SCs and regex from tenant spec
+  ALLOWED_SC=$(kubectl get tenant $backup_tenant_name -o jsonpath='{.spec.storageClasses.allowed[*]}' 2>/dev/null | tr -d '"')
+  ALLOWED_REGEX=$(kubectl get tenant $backup_tenant_name -o jsonpath='{.spec.storageClasses.allowedRegex}' 2>/dev/null | tr -d '"')
 
-  ALL_SC=$(kubectl get sc -o name | sed 's|^storageclass/||')
+  # Get all StorageClasses in cluster (just names)
+  ALL_SC=$(kubectl get sc -o name | sed 's|.*/||')
+
   MATCHED_SC=""
   for sc in $ALL_SC; do
-    if [[ " $ALLOWED_SC " =~ " $sc " ]]; then
+    if [[ -n "$ALLOWED_SC" && " $ALLOWED_SC " =~ " $sc " ]]; then
       MATCHED_SC="$MATCHED_SC $sc"
     elif [[ -n "$ALLOWED_REGEX" && $sc =~ $ALLOWED_REGEX ]]; then
       MATCHED_SC="$MATCHED_SC $sc"
     fi
   done
 
+  # Check if any SC matched
   if [ -z "$MATCHED_SC" ]; then
     info "No matching StorageClasses found for tenant $backup_tenant_name. Skipping SC backup."
     return
   fi
 
+  info "Matched StorageClasses for tenant $backup_tenant_name: $MATCHED_SC"
+
+  # Backup the matched SCs to a temporary file
   TMP_FILE="/tmp/${backup_tenant_name}-sc-backup.yaml"
   kubectl get sc $MATCHED_SC -o yaml > $TMP_FILE
 
+  # Create Velero backup for these SCs (cluster resources)
   velero create backup "${backup_tenant_name}-${cluster_name}-sc" \
     --include-cluster-resources \
-    --include-resources customresourcedefinitions,storageclasses \
-    --from-file $TMP_FILE
+    --include-resources storageclasses \
+    --from-file $TMP_FILE \
+    -n $velero_namespace
 
   if [ $? -eq 0 ]; then
     info "StorageClass backup completed for tenant $backup_tenant_name."
@@ -144,6 +153,7 @@ backup_tenant_storageclasses() {
     fail "StorageClass backup failed!"
   fi
 }
+
 
 # ------------------------------
 # Main function
