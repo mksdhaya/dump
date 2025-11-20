@@ -9,11 +9,11 @@ velero_namespace="velero-system"
 # Logging helpers
 # ------------------------------
 info() {
-  echo "INFO:  \"$1\""
+  echo "INFO:  $1"
 }
 
 fail() {
-  echo "FAIL:  \"$1\""
+  echo "FAIL:  $1"
   exit 1
 }
 
@@ -89,7 +89,7 @@ backup_tenant_resource() {
 
 backup_tenant_namespaces() {
   info "Backing up namespaces for tenant $backup_tenant_name..."
-  
+
   # Get namespaces as comma-separated list
   TENANT_NS=$(kubectl get ns -l capsule.clastix.io/tenant=$backup_tenant_name -o jsonpath='{.items[*].metadata.name}' | tr ' ' ',')
 
@@ -100,7 +100,8 @@ backup_tenant_namespaces() {
 
   velero create backup "${backup_tenant_name}-${cluster_name}-ns" \
     --include-namespaces $TENANT_NS \
-    --exclude-resources persistentvolumes,persistentvolumeclaims,volumesnapshots
+    --exclude-resources persistentvolumes,persistentvolumeclaims,volumesnapshots \
+    -n $velero_namespace
 
   if [ $? -eq 0 ]; then
     info "Namespace backup completed for tenant $backup_tenant_name."
@@ -119,46 +120,44 @@ backup_tenant_storageclasses() {
   # Get all StorageClasses in cluster (just names)
   ALL_SC=$(kubectl get sc -o name | sed 's|.*/||')
 
-# Initialize array
-MATCHED_SC_ARRAY=()
-
-for sc in $ALL_SC; do
+  # Initialize array for matched SCs
+  MATCHED_SC_ARRAY=()
+  for sc in $ALL_SC; do
     if [[ -n "$ALLOWED_SC" && " $ALLOWED_SC " =~ " $sc " ]]; then
-        MATCHED_SC_ARRAY+=("$sc")
+      MATCHED_SC_ARRAY+=("$sc")
     elif [[ -n "$ALLOWED_REGEX" && $sc =~ $ALLOWED_REGEX ]]; then
-        MATCHED_SC_ARRAY+=("$sc")
+      MATCHED_SC_ARRAY+=("$sc")
     fi
-done
+  done
 
-if [ ${#MATCHED_SC_ARRAY[@]} -eq 0 ]; then
+  if [ ${#MATCHED_SC_ARRAY[@]} -eq 0 ]; then
     info "No matching StorageClasses found for tenant $backup_tenant_name. Skipping SC backup."
     return
-fi
+  fi
 
-info "Matched StorageClasses for tenant $backup_tenant_name: ${MATCHED_SC_ARRAY[*]}"
+  info "Matched StorageClasses for tenant $backup_tenant_name: ${MATCHED_SC_ARRAY[*]}"
 
-# Backup each SC individually to temporary file (append to same file)
-TMP_FILE="/tmp/${backup_tenant_name}-sc-backup.yaml"
-> $TMP_FILE   # clear file first
+  # Backup each SC individually to temporary file
+  TMP_FILE="/tmp/${backup_tenant_name}-sc-backup.yaml"
+  > $TMP_FILE   # clear file first
 
-for sc in "${MATCHED_SC_ARRAY[@]}"; do
+  for sc in "${MATCHED_SC_ARRAY[@]}"; do
     kubectl get sc "$sc" -o yaml >> $TMP_FILE
-done
+  done
 
-# Create Velero backup
-velero create backup "${backup_tenant_name}-${cluster_name}-sc" \
+  # Create Velero backup for these SCs
+  velero create backup "${backup_tenant_name}-${cluster_name}-sc" \
     --include-cluster-resources \
     --include-resources storageclasses \
     --from-file $TMP_FILE \
     -n $velero_namespace
 
-if [ $? -eq 0 ]; then
+  if [ $? -eq 0 ]; then
     info "StorageClass backup completed for tenant $backup_tenant_name."
-else
+  else
     fail "StorageClass backup failed!"
-fi
-
-
+  fi
+}
 
 # ------------------------------
 # Main function
