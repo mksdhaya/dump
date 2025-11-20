@@ -117,10 +117,10 @@ backup_tenant_storageclasses() {
   ALLOWED_SC=$(kubectl get tenant $backup_tenant_name -o jsonpath='{.spec.storageClasses.allowed[*]}' 2>/dev/null | tr -d '"')
   ALLOWED_REGEX=$(kubectl get tenant $backup_tenant_name -o jsonpath='{.spec.storageClasses.allowedRegex}' 2>/dev/null | tr -d '"')
 
-  # Get all StorageClasses in cluster (just names)
+  # Get all StorageClasses in cluster
   ALL_SC=$(kubectl get sc -o name | sed 's|.*/||')
 
-  # Initialize array for matched SCs
+  # Match SCs
   MATCHED_SC_ARRAY=()
   for sc in $ALL_SC; do
     if [[ -n "$ALLOWED_SC" && " $ALLOWED_SC " =~ " $sc " ]]; then
@@ -137,19 +137,14 @@ backup_tenant_storageclasses() {
 
   info "Matched StorageClasses for tenant $backup_tenant_name: ${MATCHED_SC_ARRAY[*]}"
 
-  # Backup each SC individually to temporary file
-  TMP_FILE="/tmp/${backup_tenant_name}-sc-backup.yaml"
-  > $TMP_FILE   # clear file first
+  # Convert array to Velero selector format: metadata.name in (sc1,sc2,...)
+  SC_SELECTOR=$(IFS=,; echo "metadata.name in (${MATCHED_SC_ARRAY[*]})")
 
-  for sc in "${MATCHED_SC_ARRAY[@]}"; do
-    kubectl get sc "$sc" -o yaml >> $TMP_FILE
-  done
-
-  # Create Velero backup for these SCs
+  # Create Velero backup
   velero create backup "${backup_tenant_name}-${cluster_name}-sc" \
-    --include-cluster-resources \
-    --include-resources storageclasses \
-    --from-file $TMP_FILE \
+    --include-cluster-resources=true \
+    --include-resources=storageclasses \
+    --selector="$SC_SELECTOR" \
     -n $velero_namespace
 
   if [ $? -eq 0 ]; then
@@ -158,6 +153,7 @@ backup_tenant_storageclasses() {
     fail "StorageClass backup failed!"
   fi
 }
+
 
 # ------------------------------
 # Main function
