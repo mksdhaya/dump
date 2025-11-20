@@ -62,36 +62,27 @@ restore_tenant_resource() {
 }
 
 restore_tenant_storageclasses() {
-  info "Restoring tenant StorageClasses..."
-  
-  ALLOWED_SC=$(kubectl get tenant $restore_tenant_name -o jsonpath='{.spec.allowedStorageClasses[*]}')
-  ALLOWED_REGEX=$(kubectl get tenant $restore_tenant_name -o jsonpath='{.spec.allowedStorageClassesRegex}')
-  
-  ALL_SC=$(kubectl get sc -o name | sed 's|^storageclass/||')
-  MATCHED_SC=""
-  for sc in $ALL_SC; do
-    if [[ " $ALLOWED_SC " =~ " $sc " ]]; then
-      MATCHED_SC="$MATCHED_SC $sc"
-    elif [[ -n "$ALLOWED_REGEX" && $sc =~ $ALLOWED_REGEX ]]; then
-      MATCHED_SC="$MATCHED_SC $sc"
-    fi
-  done
+  info "Restoring tenant StorageClasses from backup..."
 
-  if [[ -z "$MATCHED_SC" ]]; then
-    info "No matching StorageClasses found for tenant $restore_tenant_name. Skipping SC restore."
+  # Name of the SC backup created earlier
+  SC_BACKUP_NAME="${restore_tenant_name}-${cluster_name}-sc"
+
+  # Check if the SC backup exists
+  if ! velero get backup -n $velero_namespace | grep -q "$SC_BACKUP_NAME"; then
+    info "No StorageClass backup found for tenant $restore_tenant_name. Skipping SC restore."
     return
   fi
 
-  TMP_FILE="/tmp/${restore_tenant_name}-sc-restore.yaml"
-  kubectl get sc $MATCHED_SC -o yaml > $TMP_FILE
-  kubectl apply -f $TMP_FILE
+  # Restore the backup directly
+  velero restore create --from-backup "$SC_BACKUP_NAME" -n $velero_namespace
 
   if [ $? -eq 0 ]; then
-    info "StorageClass restore completed for tenant $restore_tenant_name."
+    info "StorageClass restore initiated for tenant $restore_tenant_name."
   else
     fail "StorageClass restore failed!"
   fi
 }
+
 
 restore_tenant_namespaces() {
   BACKUP_NAME="${restore_tenant_name}-${cluster_name}-ns"
