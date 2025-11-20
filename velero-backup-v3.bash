@@ -89,8 +89,10 @@ backup_tenant_resource() {
 
 backup_tenant_namespaces() {
   info "Backing up namespaces for tenant $backup_tenant_name..."
-  TENANT_NS=$(kubectl get ns -l capsule.clastix.io/tenant=$backup_tenant_name -o jsonpath='{.items[*].metadata.name}')
   
+  # Get namespaces as comma-separated list
+  TENANT_NS=$(kubectl get ns -l capsule.clastix.io/tenant=$backup_tenant_name -o jsonpath='{.items[*].metadata.name}' | tr ' ' ',')
+
   if [ -z "$TENANT_NS" ]; then
     info "No namespaces found for tenant $backup_tenant_name. Skipping namespace backup."
     return
@@ -99,6 +101,7 @@ backup_tenant_namespaces() {
   velero create backup "${backup_tenant_name}-${cluster_name}-ns" \
     --include-namespaces $TENANT_NS \
     --exclude-resources persistentvolumes,persistentvolumeclaims,volumesnapshots
+
   if [ $? -eq 0 ]; then
     info "Namespace backup completed for tenant $backup_tenant_name."
   else
