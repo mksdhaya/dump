@@ -65,12 +65,20 @@ backup_tenant_namespaces() {
   local backup_name="${backup_tenant_name}-${cluster_name}-ns"
   info "Backing up tenant namespaces: $backup_name"
 
+  # Get namespaces as comma-separated list
+  local ns_list
+  ns_list=$(kubectl get ns -l capsule.clastix.io/tenant=$backup_tenant_name -o jsonpath='{range .items[*]}{.metadata.name},{end}')
+  ns_list=${ns_list%,}  # Remove trailing comma
+
+  [[ -z "$ns_list" ]] && fail "No namespaces found for tenant $backup_tenant_name"
+
   velero backup create "$backup_name" \
-    --include-namespaces $(kubectl get ns -l capsule.clastix.io/tenant=$backup_tenant_name -o jsonpath='{.items[*].metadata.name}') \
+    --include-namespaces "$ns_list" \
     -n $velero_namespace || fail "Tenant namespaces backup failed!"
 
   info "Tenant namespaces backup completed: $backup_name"
 }
+
 
 backup_tenant_storageclasses() {
   local backup_name="${backup_tenant_name}-${cluster_name}-sc"
