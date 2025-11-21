@@ -47,15 +47,35 @@ restore_tenant_resource() {
   info "Tenant resource restore completed"
 }
 
+wait_for_namespaces() {
+  info "Waiting for tenant namespaces to be ready..."
+  local timeout=30
+  local interval=5
+  local elapsed=0
+  local ns_list
+  ns_list=$(kubectl get ns -l "$LABEL_KEY=$restore_tenant_name" -o jsonpath='{.items[*].metadata.name}')
+
+  while [[ -z "$ns_list" && $elapsed -lt $timeout ]]; do
+    sleep $interval
+    elapsed=$((elapsed + interval))
+    ns_list=$(kubectl get ns -l "$LABEL_KEY=$restore_tenant_name" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+  done
+
+  [[ -n "$ns_list" ]] || fail "Timeout waiting for tenant namespaces to be restored"
+  info "Namespaces restored: $ns_list"
+}
+
 restore_tenant_namespaces() {
   local backup_name="${restore_tenant_name}-${cluster_name}-ns"
   info "Restoring tenant namespaces from backup: $backup_name"
 
   velero restore create --from-backup "$backup_name" || fail "Tenant namespaces restore failed!"
-  info "Tenant namespaces restore completed"
+  info "Tenant namespaces restore initiated"
 
+  wait_for_namespaces
   patch_tenant_namespaces
 }
+
 
 restore_tenant_storageclasses() {
   local sc_backup_name="${restore_tenant_name}-${cluster_name}-sc"
@@ -135,6 +155,7 @@ main() {
   check_tenant_exists
 
   restore_tenant_resource
+  wait_for_namespaces
   restore_tenant_namespaces
   restore_tenant_storageclasses
 
