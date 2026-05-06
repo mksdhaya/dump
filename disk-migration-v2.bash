@@ -73,22 +73,41 @@ rsync -aHAXx --numeric-ids $LOG_MNT/ $TMP_BASE/log/
 rsync -aHAXx --numeric-ids $BACKUP_MNT/ $TMP_BASE/backup/
 rsync -aHAXx --numeric-ids $OPENEBS_MNT/ $TMP_BASE/openebs/
 
-####################################################
-echo "=== STEP 6: VALIDATE RSYNC SIZE ==="
-####################################################
-compare() {
-  s=$(df -k $1 | awk 'NR==2{print $3}')
-  d=$(df -k $2 | awk 'NR==2{print $3}')
-  diff=$(( s>d?s-d:d-s ))
-  pct=$(( diff*100/s ))
-  echo "$1 vs $2 = ${pct}% diff"
-  [ $pct -gt 5 ] && exit 1
+########################################
+echo "=== STEP 6: VALIDATE FILESYSTEM USAGE (GB) ==="
+########################################
+
+compare_fs_usage_gb() {
+  local src=$1
+  local dst=$2
+  local name=$3
+
+  # Convert KB → GB (rounded)
+  src_used=$(df -k "$src" | awk 'NR==2 {print int($3/1024/1024)}')
+  dst_used=$(df -k "$dst" | awk 'NR==2 {print int($3/1024/1024)}')
+
+  echo "$name:"
+  echo "  Source : ${src_used} GB"
+  echo "  Target : ${dst_used} GB"
+
+  # Allow 5% tolerance
+  upper_limit=$(( src_used + (src_used * 5 / 100) ))
+  lower_limit=$(( src_used - (src_used * 5 / 100) ))
+
+  if [ "$dst_used" -gt "$upper_limit" ] || [ "$dst_used" -lt "$lower_limit" ]; then
+    echo "ERROR: FS size mismatch detected for $name"
+    exit 1
+  fi
+
+  echo "OK: $name FS usage within acceptable range"
 }
 
-compare $RUNTIME_MNT $TMP_BASE/runtime
-compare $LOG_MNT $TMP_BASE/log
-compare $BACKUP_MNT $TMP_BASE/backup
-compare $OPENEBS_MNT $TMP_BASE/openebs
+compare_fs_usage_gb $RUNTIME_MNT $TMP_BASE/runtime "containerd"
+compare_fs_usage_gb $LOG_MNT $TMP_BASE/log "logs"
+compare_fs_usage_gb $BACKUP_MNT $TMP_BASE/backup "backup"
+compare_fs_usage_gb $OPENEBS_MNT $TMP_BASE/openebs "openebs"
+
+echo "=== FS VALIDATION (GB) PASSED ==="
 
 ####################################################
 echo "=== STEP 7: UNMOUNT OLD VG ==="
